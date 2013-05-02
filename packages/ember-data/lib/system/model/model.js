@@ -37,6 +37,7 @@ DS.Model = Ember.Object.extend(Ember.Evented, {
   id: null,
   transaction: null,
   stateManager: null,
+  error: null,
   errors: null,
 
   /**
@@ -147,6 +148,15 @@ DS.Model = Ember.Object.extend(Ember.Evented, {
 
     var stateManager = DS.StateManager.create({ record: this });
     set(this, 'stateManager', stateManager);
+
+    var errors = DS.Errors.create();
+    errors.on('becameInvalid', this, function() {
+      this.send('becameInvalid');
+    });
+    errors.on('becameValid', this, function() {
+      this.send('becameValid');
+    });
+    set(this, 'errors', errors);
 
     this._setup();
 
@@ -447,11 +457,19 @@ DS.Model = Ember.Object.extend(Ember.Evented, {
   },
 
   adapterDidInvalidate: function(errors) {
-    this.send('becameInvalid', errors);
+    var recordErrors = get(this, 'errors');
+    function addError(name) {
+      if (errors[name]) {
+        recordErrors.add(name, errors[name]);
+      }
+    }
+
+    this.eachAttribute(addError);
+    this.eachRelationship(addError);
   },
 
-  adapterDidError: function() {
-    this.send('becameError');
+  adapterDidError: function(error) {
+    this.send('becameError', error);
   },
 
   /**
