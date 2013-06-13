@@ -4,7 +4,7 @@ var Adapter, Person, Group, Role, adapter, serializer, store, ajaxUrl, ajaxType,
 var forEach = Ember.EnumerableUtils.forEach;
 
 // Note: You will need to ensure that you do not attempt to assert against flags that do not exist in this array (or else they will show positive).
-recordArrayFlags = ['isLoaded'];
+recordArrayFlags = ['isLoaded', 'isUpdating'];
 manyArrayFlags = ['isLoaded'];
 
 // Used for testing the adapter state path on a single entity
@@ -451,7 +451,7 @@ test("finding all people makes a GET to /people", function() {
   people = store.find(Person);
 
   // test
-  enabledFlags(people, ['isLoaded', 'isValid'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
 
@@ -473,7 +473,7 @@ test("finding all can sideload data", function() {
   groups = store.find(Group);
 
   // test
-  enabledFlags(groups, ['isLoaded'], recordArrayFlags);
+  enabledFlags(groups, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/groups", "the plural of the model name");
   expectType("GET");
 
@@ -494,12 +494,22 @@ test("finding all can sideload data", function() {
 });
 
 test("finding all people with since makes a GET to /people", function() {
+  expect(59);
+
+  function didUpdate() {
+    enabledFlags(people, ['isLoaded'], recordArrayFlags);
+    equal(people.get('length'), size, 'record array should be filled');
+    people.removeObserver('isUpdating', didUpdate);
+  }
+
   // setup
-  var people, person;
+  var people, person, size = 1;
   people = store.find(Person);
 
+  people.addObserver('isUpdating', didUpdate);
+
   // test
-  enabledFlags(people, ['isLoaded'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
 
@@ -507,8 +517,11 @@ test("finding all people with since makes a GET to /people", function() {
   ajaxHash.success({ meta: { since: '123'}, people: [{ id: 1, name: "Yehuda Katz" }] });
   people = store.find(Person);
 
+  size = 2;
+  people.addObserver('isUpdating', didUpdate);
+
   // test
-  enabledFlags(people, ['isLoaded'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
   expectData({since: '123'});
@@ -526,9 +539,12 @@ test("finding all people with since makes a GET to /people", function() {
   // setup
   people.update();
 
+  size = 3;
+  people.addObserver('isUpdating', didUpdate);
+
   // test
   stateEquals(person, 'loaded.saved');
-  enabledFlags(people, ['isLoaded'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   enabledFlags(person, ['isLoaded', 'isValid']);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
@@ -555,7 +571,7 @@ test("meta and since are configurable", function() {
   people = store.find(Person);
 
   // test
-  enabledFlags(people, ['isLoaded'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
 
@@ -569,7 +585,7 @@ test("meta and since are configurable", function() {
   people.update();
 
   // test
-  enabledFlags(people, ['isLoaded'], recordArrayFlags);
+  enabledFlags(people, ['isLoaded', 'isUpdating'], recordArrayFlags);
   expectUrl("/people", "the plural of the model name");
   expectType("GET");
   expectData({lastToken: '123'});
@@ -809,7 +825,7 @@ test("finding people by a query", function() {
   // test
   statesEqual([rein, tom, yehuda], 'loaded.saved');
   enabledFlags(people, ['isLoaded'], recordArrayFlags);
-  enabledFlagsForArray([rein, tom, yehuda], ['isLoaded'], recordArrayFlags);
+  enabledFlagsForArray([rein, tom, yehuda], ['isLoaded', 'isValid']);
   equal(get(people, 'length'), 3, "the people are now loaded");
   equal(get(rein, 'name'), "Rein Heinrichs");
   equal(get(tom, 'name'), "Tom Dale");
