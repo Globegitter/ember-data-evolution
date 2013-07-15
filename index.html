@@ -37,6 +37,8 @@ designed specifically for the unique environment of JavaScript in the browser.</
 <p>Ember Data Nemesis is a patch set maintained by me (<a href="https://github.com/tchak" class="user-mention">@tchak</a>). It contains some fixes and some new experimental features.
 It is not meant to be a fork. Nemesis is regulary synced with the master of regular Ember Data.
 There is no guaranty on the api. All the features are meant to be merged in the main repo at some point.</p>
+
+<p class="version">Latest build is : #VERSION#</p>
         </section>
 
         <aside id="sidebar">
@@ -56,6 +58,15 @@ There is no guaranty on the api. All the features are meant to be merged in the 
       </div>
     </div>
 
-  
+    <script type="text/javascript" src="http://code.jquery.com/jquery-2.0.3.min.js"></script>>
+    <script>
+      var $version = $('.version');
+      $.get('VERSION').then(function(data) {
+        var content = $version.text();
+        content = content.replace('#VERSION#', data.trim());
+        $version.text(content);
+      });
+    </script>
+
   </body>
 </html>
