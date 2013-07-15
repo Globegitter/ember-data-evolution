@@ -1,5 +1,5 @@
-// Version: v0.13-71-gf43c4c7
-// Last commit: f43c4c7 (2013-07-15 14:30:24 +0200)
+// Version: v0.13-71-g58aaac1
+// Last commit: 58aaac1 (2013-07-15 17:14:18 +0200)
 
 
 (function() {
@@ -3707,7 +3707,13 @@ DS.Model = Ember.Object.extend(Ember.Evented, {
     var stateManager = DS.StateManager.create({ record: this });
     set(this, 'stateManager', stateManager);
 
-    var errors = DS.Errors.create({ record: this });
+    var errors = DS.Errors.create();
+    errors.on('becameInvalid', this, function() {
+      this.send('becameInvalid');
+    });
+    errors.on('becameValid', this, function() {
+      this.send('becameValid');
+    });
     set(this, 'errors', errors);
 
     this._setup();
@@ -4010,12 +4016,14 @@ DS.Model = Ember.Object.extend(Ember.Evented, {
 
   adapterDidInvalidate: function(errors) {
     var recordErrors = get(this, 'errors');
-
-    this.eachAttribute(function(name) {
+    function addError(name) {
       if (errors[name]) {
         recordErrors.add(name, errors[name]);
       }
-    });
+    }
+
+    this.eachAttribute(addError);
+    this.eachRelationship(addError);
   },
 
   adapterDidError: function(error) {
@@ -4149,15 +4157,19 @@ DS.Model.reopenClass({
     });
 
     return map;
-  })
+  }),
+
+  eachAttribute: function(callback, binding) {
+    get(this, 'attributes').forEach(function(name, meta) {
+      callback.call(binding, name, meta);
+    });
+  }
 });
 
 
 DS.Model.reopen({
   eachAttribute: function(callback, binding) {
-    get(this.constructor, 'attributes').forEach(function(name, meta) {
-      callback.call(binding, name, meta);
-    }, binding);
+    this.constructor.eachAttribute(callback, binding);
   },
 
   attributeWillChange: Ember.beforeObserver(function(record, key) {
@@ -4219,8 +4231,6 @@ DS.attr = function(type, options) {
 var get = Ember.get, set = Ember.set;
 
 DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
-  record: null,
-
   errorsByAttributeName: Ember.computed(function() {
     return Ember.MapWithDefault.create({
       defaultValue: function() { return Ember.A(); }
@@ -4255,7 +4265,7 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
     this.notifyPropertyChange(name);
 
     if (!get(this, 'isEmpty')) {
-      get(this, 'record').send('becameInvalid');
+      this.trigger('becameInvalid');
     }
   },
 
@@ -4268,7 +4278,7 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
     this.notifyPropertyChange(name);
 
     if (get(this, 'isEmpty')) {
-      get(this, 'record').send('becameValid');
+      this.trigger('becameValid');
     }
   },
 
@@ -4276,7 +4286,7 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
     this.notifyPropertyChange('errorsByAttributeName');
     this.notifyPropertyChange('content');
 
-    get(this, 'record').send('becameValid');
+    this.trigger('becameValid');
   },
 
   has: function(name) {
@@ -8639,11 +8649,25 @@ DS.RESTSerializer = DS.JSONSerializer.extend({
   extractValidationErrors: function(type, json) {
     var errors = {};
 
-    get(type, 'attributes').forEach(function(name) {
-      var key = this._keyForAttributeName(type, name);
+    function addError(name, key) {
       if (json['errors'].hasOwnProperty(key)) {
         errors[name] = json['errors'][key];
       }
+    }
+
+    type.eachAttribute(function(name) {
+      var key = this._keyForAttributeName(type, name);
+      addError(name, key);
+    }, this);
+
+    type.eachRelationship(function(name, meta) {
+      var key;
+      if (meta.kind === 'belongsTo') {
+        key = this._keyForBelongsTo(type, name);
+      } else if (meta.kind === 'hasMany') {
+        key = this._keyForHasMany(type, name);
+      }
+      addError(name, key);
     }, this);
 
     return errors;
