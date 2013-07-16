@@ -1,5 +1,5 @@
-// Version: v0.13-71-g8a66e95
-// Last commit: 8a66e95 (2013-07-15 18:35:21 +0200)
+// Version: v0.13-72-g8350797
+// Last commit: 8350797 (2013-07-16 11:14:26 +0200)
 
 
 (function() {
@@ -101,6 +101,9 @@ Ember.onLoad('Ember.Application', function(Application) {
 
     initialize: function(container, application) {
       application.register('store:main', application.Store);
+
+      application.register('adapter:rest', DS.RESTAdapter);
+      application.register('adapter:fixture', DS.FixtureAdapter);
 
       // Eagerly generate the store so defaultStore is populated.
       // TODO: Do this in a finisher hook
@@ -686,7 +689,7 @@ DS.Transaction = Ember.Object.extend({
     Ember.assert("You must pass a record into transaction.add()", record instanceof DS.Model);
 
     var store = get(this, 'store');
-    var adapter = get(store, '_adapter');
+    var adapter = store.adapterForType(record.constructor);
     var serializer = get(adapter, 'serializer');
     serializer.eachEmbeddedRecord(record, function(embeddedRecord, embeddedType) {
       if (embeddedType === 'load') { return; }
@@ -1268,7 +1271,7 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
       Ember.debug("A custom DS.Adapter was not provided as the 'Adapter' property of your application's Store. The default (DS.RESTAdapter) will be used.");
     }
 
-    return 'DS.RESTAdapter';
+    return DS.RESTAdapter;
   }).property(),
 
 
@@ -1307,10 +1310,11 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
 
     @returns DS.Adapter
   */
-  _adapter: Ember.computed(function() {
+  defaultAdapter: Ember.computed(function() {
     var adapter = get(this, 'adapter');
-    if (typeof adapter === 'string') {
-      adapter = get(this, adapter, false) || get(Ember.lookup, adapter);
+
+    if (typeof adapter === 'string' && this.container) {
+      adapter = this.container.lookup('adapter:'+adapter);
     }
 
     if (DS.Adapter.detect(adapter)) {
@@ -2720,7 +2724,7 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
     var adapter = this._adaptersMap.get(type);
     if (adapter) { return adapter; }
 
-    return this.get('_adapter');
+    return this.get('defaultAdapter');
   },
 
   // ..............................
@@ -9071,6 +9075,14 @@ DS.RESTAdapter = DS.Adapter.extend({
   },
 
   extractError: function(response, type) {
+    if (response.status === 422) {
+      return this.extractValidationError(response, type);
+    } else {
+      return this.extractNetworkError(response, type);
+    }
+  },
+
+  extractNetworkError: function(response, type) {
     switch (response.textStatus) {
     case 'timeout':
       return new DS.TimeoutError(response.textStatus);
@@ -9080,8 +9092,6 @@ DS.RESTAdapter = DS.Adapter.extend({
       return new DS.ParserError(response.textStatus);
     default:
       switch (response.status) {
-      case 422:
-        return this.extractValidationError(response, type);
       case 401:
         return new DS.UnauthorizedError(response.content);
       case 403:
@@ -9102,6 +9112,14 @@ DS.RESTAdapter = DS.Adapter.extend({
     error.errors = serializer.extractValidationErrors(type, json);
 
     return error;
+  },
+
+  responseHandler: function(response, success, error) {
+    if (response.isSuccess) {
+      success.call(this, response.content);
+    } else {
+      throw error.call(this, response);
+    }
   },
 
   ajax: function(url, type, hash) {
@@ -9146,14 +9164,6 @@ DS.RESTAdapter = DS.Adapter.extend({
 
       Ember.$.ajax(hash);
     }).then(handler, handler);
-  },
-
-  responseHandler: function(response, success, error) {
-    if (response.isSuccess) {
-      success.call(this, response.content);
-    } else {
-      throw error.call(this, response);
-    }
   },
 
   url: "",
