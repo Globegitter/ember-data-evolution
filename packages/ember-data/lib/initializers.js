@@ -37,6 +37,9 @@ Ember.onLoad('Ember.Application', function(Application) {
     initialize: function(container, application) {
       application.register('store:main', application.Store);
 
+      application.register('adapter:rest', DS.RESTAdapter);
+      application.register('adapter:fixture', DS.FixtureAdapter);
+
       // Eagerly generate the store so defaultStore is populated.
       // TODO: Do this in a finisher hook
       container.lookup('store:main');

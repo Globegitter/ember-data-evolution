@@ -192,7 +192,7 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
       Ember.debug("A custom DS.Adapter was not provided as the 'Adapter' property of your application's Store. The default (DS.RESTAdapter) will be used.");
     }
 
-    return 'DS.RESTAdapter';
+    return DS.RESTAdapter;
   }).property(),
 
 
@@ -231,10 +231,11 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
 
     @returns DS.Adapter
   */
-  _adapter: Ember.computed(function() {
+  defaultAdapter: Ember.computed(function() {
     var adapter = get(this, 'adapter');
-    if (typeof adapter === 'string') {
-      adapter = get(this, adapter, false) || get(Ember.lookup, adapter);
+
+    if (typeof adapter === 'string' && this.container) {
+      adapter = this.container.lookup('adapter:'+adapter);
     }
 
     if (DS.Adapter.detect(adapter)) {
@@ -1639,7 +1640,7 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
     var adapter = this._adaptersMap.get(type);
     if (adapter) { return adapter; }
 
-    return this.get('_adapter');
+    return this.get('defaultAdapter');
   },
 
   // ..............................
