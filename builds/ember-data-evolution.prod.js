@@ -8730,7 +8730,7 @@ DS.HttpResponse = function(xhr, textStatus, content) {
   this.header = function(header) {
     return xhr.getResponseHeader(header);
   };
-  this.isSuccess = (textStatus === 'success');
+  this.isSuccess = (xhr.status >= 200 && xhr.status < 400);
 };
 
 /**
@@ -8844,13 +8844,11 @@ DS.RESTAdapter = DS.Adapter.extend({
 
     data[root] = this.serialize(record, { includeId: true });
 
-    return this.ajax(this.buildURL(root), "POST", {
+    return this.requestHandler(type, this.buildURL(root), {
+      method: "POST",
       data: data,
       success: function(payload) {
         this.didCreateRecord(store, type, record, payload);
-      },
-      error: function(response) {
-        return this.extractError(response, type);
       }
     }).then(null, DS.rejectionHandler);
   },
@@ -8871,7 +8869,8 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(this.serialize(record, { includeId: true }));
     }, this);
 
-    return this.ajax(this.buildURL(root), "POST", {
+    return this.requestHandler(type, this.buildURL(root), {
+      method: "POST",
       data: data,
       success: function(payload) {
         this.didCreateRecords(store, type, records, payload);
@@ -8896,13 +8895,11 @@ DS.RESTAdapter = DS.Adapter.extend({
     data = {};
     data[root] = this.serialize(record);
 
-    return this.ajax(this.buildURL(root, id), "PUT",{
+    return this.requestHandler(type, this.buildURL(root, id), {
+      method: "PUT",
       data: data,
       success: function(payload) {
         this.didUpdateRecord(store, type, record, payload);
-      },
-      error: function(response) {
-        return this.extractError(response, type);
       }
     }).then(null, DS.rejectionHandler);
   },
@@ -8926,7 +8923,8 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(this.serialize(record, { includeId: true }));
     }, this);
 
-    return this.ajax(this.buildURL(root, "bulk"), "PUT", {
+    return this.requestHandler(type, this.buildURL(root, "bulk"), {
+      method: "PUT",
       data: data,
       success: function(payload) {
         this.didUpdateRecords(store, type, records, payload);
@@ -8948,12 +8946,10 @@ DS.RESTAdapter = DS.Adapter.extend({
     root = this.rootForType(type);
     adapter = this;
 
-    return this.ajax(this.buildURL(root, id), "DELETE", {
+    return this.requestHandler(type, this.buildURL(root, id), {
+      method: "DELETE",
       success: function(payload) {
         this.didDeleteRecord(store, type, record, payload);
-      },
-      error: function(response) {
-        return this.extractError(response, type);
       }
     }).then(null, DS.rejectionHandler);
   },
@@ -8977,7 +8973,8 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(serializer.serializeId( get(record, 'id') ));
     });
 
-    return this.ajax(this.buildURL(root, 'bulk'), "DELETE", {
+    return this.requestHandler(type, this.buildURL(root, 'bulk'), {
+      method: "DELETE",
       data: data,
       success: function(payload) {
         this.didDeleteRecords(store, type, records, payload);
@@ -8995,7 +8992,8 @@ DS.RESTAdapter = DS.Adapter.extend({
   find: function(store, type, id) {
     var root = this.rootForType(type);
 
-    return this.ajax(this.buildURL(root, id), "GET", {
+    return this.requestHandler(type, this.buildURL(root, id), {
+      method: "GET",
       success: function(payload) {
         this.didFindRecord(store, type, payload, id);
       }
@@ -9005,7 +9003,8 @@ DS.RESTAdapter = DS.Adapter.extend({
   findAll: function(store, type, since) {
     var root = this.rootForType(type);
 
-    return this.ajax(this.buildURL(root), "GET",{
+    return this.requestHandler(type, this.buildURL(root), {
+      method: "GET",
       data: this.sinceQuery(since),
       success: function(payload) {
         this.didFindAll(store, type, payload);
@@ -9016,7 +9015,8 @@ DS.RESTAdapter = DS.Adapter.extend({
   findQuery: function(store, type, query, recordArray) {
     var root = this.rootForType(type);
 
-    return this.ajax(this.buildURL(root), "GET", {
+    return this.requestHandler(type, this.buildURL(root), {
+      method: "GET",
       data: query,
       success: function(payload) {
         this.didFindQuery(store, type, payload, recordArray);
@@ -9029,7 +9029,8 @@ DS.RESTAdapter = DS.Adapter.extend({
 
     ids = this.serializeIds(ids);
 
-    return this.ajax(this.buildURL(root), "GET", {
+    return this.requestHandler(type, this.buildURL(root), {
+      method: "GET",
       data: {ids: ids},
       success: function(payload) {
         this.didFindMany(store, type, payload);
@@ -9100,37 +9101,46 @@ DS.RESTAdapter = DS.Adapter.extend({
     }
   },
 
-  ajax: function(url, type, hash) {
+  requestHandler: function(type, url, options) {
     var adapter = this,
-        success = hash.success,
-        error = hash.error;
+        success = options.success,
+        error = options.error,
+        method = options.method;
 
     error = error || function(response) {
-      return this.extractError(response);
+      return this.extractError(response, type);
     };
 
     function handler(response) {
       adapter.responseHandler(response, success, error);
     }
 
-    return new Ember.RSVP.Promise(function(resolve, reject) {
-      hash = hash || {};
-      hash.url = url;
-      hash.type = type;
-      hash.dataType = 'json';
+    delete options.success;
+    delete options.error;
+    delete options.method;
 
-      if (hash.data && type !== 'GET') {
-        hash.contentType = 'application/json; charset=utf-8';
-        hash.data = JSON.stringify(hash.data);
+    return this.ajax(url, method, options).then(handler, handler);
+  },
+
+  ajax: function(url, method, options) {
+    return new Ember.RSVP.Promise(function(resolve, reject) {
+      options = options || {};
+      options.url = url;
+      options.type = method;
+      options.dataType = 'json';
+
+      if (options.data && method !== 'GET') {
+        options.contentType = 'application/json; charset=utf-8';
+        options.data = JSON.stringify(options.data);
       }
 
-      hash.success = function(json, textStatus, jqXHR) {
+      options.success = function(json, textStatus, jqXHR) {
         var response = new DS.HttpResponse(jqXHR, textStatus, json);
 
         Ember.run(null, resolve, response);
       };
 
-      hash.error = function(jqXHR, textStatus, errorThrown) {
+      options.error = function(jqXHR, textStatus, errorThrown) {
         var response = new DS.HttpResponse(jqXHR, textStatus);
 
         if (textStatus !== 'error' || response.status >= 500) {
@@ -9140,8 +9150,8 @@ DS.RESTAdapter = DS.Adapter.extend({
         }
       };
 
-      Ember.$.ajax(hash);
-    }).then(handler, handler);
+      Ember.$.ajax(options);
+    });
   },
 
   url: "",
