@@ -208,7 +208,7 @@ test('creating a person fires the didCreate event after materialising the model'
   store.commit();
 
   // setup
-  ajaxHash.success({ person: { id: 1, name: "Tom Dale" } });
+  ajaxSuccess({ person: { id: 1, name: "Tom Dale" } });
 });
 
 test("singular creations can sideload data", function() {
