@@ -1970,7 +1970,7 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
     @param {string} id
     @return {boolean}
   */
-  recordIsLoaded: function(type, id) {
+  exists: function(type, id) {
     if (!this.hasReferenceForId(type, id)) { return false; }
     return typeof this.referenceForId(type, id).data === 'object';
   },
@@ -4112,6 +4112,15 @@ DS.Model.reopenClass({
   filter: storeAlias('filter'),
 
   /**
+    See {{#crossLink "DS.Store/exists:method"}}`DS.Store.exists()`{{/crossLink}}.
+
+    @method exists
+    @param {String} id
+    @return {boolean}
+  */
+  exists: storeAlias('exists'),
+
+  /**
     See {{#crossLink "DS.Store/createRecord:method"}}`DS.Store.createRecord()`{{/crossLink}}.
 
     @method createRecord
@@ -4247,7 +4256,8 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
 
   add: function(name, messages) {
     var errorsByAttributeName = get(this, 'errorsByAttributeName'),
-        errors = errorsByAttributeName.get(name);
+        errors = errorsByAttributeName.get(name),
+        isEmpty = get(this, 'isEmpty');
 
     messages = Ember.makeArray(messages);
 
@@ -4255,12 +4265,14 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
     get(this, 'content').addObjects(messages);
     this.notifyPropertyChange(name);
 
-    if (!get(this, 'isEmpty')) {
+    if (isEmpty && !get(this, 'isEmpty')) {
       this.trigger('becameInvalid');
     }
   },
 
   remove: function(name) {
+    if (get(this, 'isEmpty')) { return; }
+
     var errorsByAttributeName = get(this, 'errorsByAttributeName'),
         errors = errorsByAttributeName.get(name);
 
@@ -4274,6 +4286,8 @@ DS.Errors = Ember.Object.extend(Ember.Enumerable, Ember.Evented, {
   },
 
   clear: function() {
+    if (get(this, 'isEmpty')) { return; }
+
     this.notifyPropertyChange('errorsByAttributeName');
     this.notifyPropertyChange('content');
 
@@ -8364,8 +8378,7 @@ DS.FixtureSerializer = DS.Serializer.extend({
 */
 
 var get = Ember.get, fmt = Ember.String.fmt,
-    indexOf = Ember.EnumerableUtils.indexOf,
-    dump = Ember.get(window, 'JSON.stringify') || function(object) { return object.toString(); };
+    indexOf = Ember.EnumerableUtils.indexOf;
 
 /**
   `DS.FixtureAdapter` is an adapter that loads records from memory.
@@ -8398,7 +8411,7 @@ DS.FixtureAdapter = DS.Adapter.extend({
       return fixtures.map(function(fixture){
         var fixtureIdType = typeof fixture.id;
         if(fixtureIdType !== "number" && fixtureIdType !== "string"){
-          throw new Error(fmt('the id property must be defined as a number or string for fixture %@', [dump(fixture)]));
+          throw new Error(fmt('the id property must be defined as a number or string for fixture %@', [fixture]));
         }
         fixture.id = fixture.id + '';
         return fixture;
@@ -8663,13 +8676,18 @@ DS.RESTSerializer = DS.JSONSerializer.extend({
 (function() {
 var errorProps = ['description', 'fileName', 'lineNumber', 'message', 'name', 'number', 'stack'];
 
-var extendError = function(superError) {
+var extendError = function(superError, constructor) {
   var error = function() {
-    var tmp = superError.apply(this, arguments);
+    if (constructor) {
+      superError.apply(this);
+      constructor.apply(this, arguments);
+    } else {
+      var parent = superError.apply(this, arguments);
 
-    // Unfortunately errors are not enumerable in Chrome (at least), so `for prop in tmp` doesn't work.
-    for (var idx = 0; idx < errorProps.length; idx++) {
-      this[errorProps[idx]] = tmp[errorProps[idx]];
+      // Unfortunately errors are not enumerable in Chrome (at least), so `for prop in tmp` doesn't work.
+      for (var idx = 0; idx < errorProps.length; idx++) {
+        this[errorProps[idx]] = parent[errorProps[idx]];
+      }
     }
 
     return this;
@@ -8677,8 +8695,8 @@ var extendError = function(superError) {
 
   error.prototype = Ember.create(superError.prototype);
 
-  error.extend = function() {
-    return extendError(this);
+  error.extend = function(constructor) {
+    return extendError(this, constructor);
   };
 
   return error;
@@ -8702,7 +8720,9 @@ DS.NotFoundError = DS.Error.extend();
 DS.UnauthorizedError = DS.Error.extend();
 DS.ForbiddenError = DS.Error.extend();
 
-DS.ValidationError = DS.Error.extend();
+DS.ValidationError = DS.Error.extend(function(errors) {
+  this.errors = errors;
+});
 DS.AdapterValidationError = DS.ValidationError.extend();
 
 })();
@@ -8844,13 +8864,13 @@ DS.RESTAdapter = DS.Adapter.extend({
 
     data[root] = this.serialize(record, { includeId: true });
 
-    return this.requestHandler(type, this.buildURL(root), {
+    return this.request(type, this.buildURL(root), {
       method: "POST",
       data: data,
       success: function(payload) {
         this.didCreateRecord(store, type, record, payload);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   createRecords: function(store, type, records) {
@@ -8869,7 +8889,7 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(this.serialize(record, { includeId: true }));
     }, this);
 
-    return this.requestHandler(type, this.buildURL(root), {
+    return this.request(type, this.buildURL(root), {
       method: "POST",
       data: data,
       success: function(payload) {
@@ -8882,7 +8902,7 @@ DS.RESTAdapter = DS.Adapter.extend({
           store.resolveWith(thenable, record);
         });
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   updateRecord: function(store, type, record) {
@@ -8895,13 +8915,13 @@ DS.RESTAdapter = DS.Adapter.extend({
     data = {};
     data[root] = this.serialize(record);
 
-    return this.requestHandler(type, this.buildURL(root, id), {
+    return this.request(type, this.buildURL(root, id, record), {
       method: "PUT",
       data: data,
       success: function(payload) {
         this.didUpdateRecord(store, type, record, payload);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   updateRecords: function(store, type, records) {
@@ -8923,7 +8943,7 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(this.serialize(record, { includeId: true }));
     }, this);
 
-    return this.requestHandler(type, this.buildURL(root, "bulk"), {
+    return this.request(type, this.buildURL(root, "bulk"), {
       method: "PUT",
       data: data,
       success: function(payload) {
@@ -8936,7 +8956,7 @@ DS.RESTAdapter = DS.Adapter.extend({
           store.resolveWith(thenable, record);
         });
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   deleteRecord: function(store, type, record) {
@@ -8946,12 +8966,12 @@ DS.RESTAdapter = DS.Adapter.extend({
     root = this.rootForType(type);
     adapter = this;
 
-    return this.requestHandler(type, this.buildURL(root, id), {
+    return this.request(type, this.buildURL(root, id, record), {
       method: "DELETE",
       success: function(payload) {
         this.didDeleteRecord(store, type, record, payload);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   deleteRecords: function(store, type, records) {
@@ -8973,7 +8993,7 @@ DS.RESTAdapter = DS.Adapter.extend({
       data[plural].push(serializer.serializeId( get(record, 'id') ));
     });
 
-    return this.requestHandler(type, this.buildURL(root, 'bulk'), {
+    return this.request(type, this.buildURL(root, 'bulk'), {
       method: "DELETE",
       data: data,
       success: function(payload) {
@@ -8986,42 +9006,42 @@ DS.RESTAdapter = DS.Adapter.extend({
           store.resolveWith(thenable, record);
         });
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   find: function(store, type, id) {
     var root = this.rootForType(type);
 
-    return this.requestHandler(type, this.buildURL(root, id), {
+    return this.request(type, this.buildURL(root, id), {
       method: "GET",
       success: function(payload) {
         this.didFindRecord(store, type, payload, id);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   findAll: function(store, type, since) {
     var root = this.rootForType(type);
 
-    return this.requestHandler(type, this.buildURL(root), {
+    return this.request(type, this.buildURL(root), {
       method: "GET",
       data: this.sinceQuery(since),
       success: function(payload) {
         this.didFindAll(store, type, payload);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   findQuery: function(store, type, query, recordArray) {
     var root = this.rootForType(type);
 
-    return this.requestHandler(type, this.buildURL(root), {
+    return this.request(type, this.buildURL(root), {
       method: "GET",
       data: query,
       success: function(payload) {
         this.didFindQuery(store, type, payload, recordArray);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   findMany: function(store, type, ids, owner) {
@@ -9029,13 +9049,13 @@ DS.RESTAdapter = DS.Adapter.extend({
 
     ids = this.serializeIds(ids);
 
-    return this.requestHandler(type, this.buildURL(root), {
+    return this.request(type, this.buildURL(root), {
       method: "GET",
       data: {ids: ids},
       success: function(payload) {
         this.didFindMany(store, type, payload);
       }
-    }).then(null, DS.rejectionHandler);
+    });
   },
 
   /**
@@ -9053,15 +9073,15 @@ DS.RESTAdapter = DS.Adapter.extend({
     });
   },
 
-  extractError: function(response, type) {
+  didError: function(response, type) {
     if (response.status === 422) {
-      return this.extractValidationError(response, type);
+      return this.didValidationError(response, type);
     } else {
-      return this.extractNetworkError(response, type);
+      return this.didAdapterError(response, type);
     }
   },
 
-  extractNetworkError: function(response, type) {
+  didAdapterError: function(response, type) {
     switch (response.textStatus) {
     case 'timeout':
       return new DS.TimeoutError(response.textStatus);
@@ -9083,12 +9103,11 @@ DS.RESTAdapter = DS.Adapter.extend({
     }
   },
 
-  extractValidationError: function(response, type) {
+  didValidationError: function(response, type) {
     var json = JSON.parse(response.content),
         serializer = get(this, 'serializer'),
-        error = new DS.AdapterValidationError();
-
-    error.errors = serializer.extractValidationErrors(type, json);
+        errors = serializer.extractValidationErrors(type, json),
+        error = new DS.AdapterValidationError(errors);
 
     return error;
   },
@@ -9101,25 +9120,27 @@ DS.RESTAdapter = DS.Adapter.extend({
     }
   },
 
-  requestHandler: function(type, url, options) {
+  request: function(type, url, options) {
     var adapter = this,
         success = options.success,
         error = options.error,
         method = options.method;
 
     error = error || function(response) {
-      return this.extractError(response, type);
+      return this.didError(response, type);
     };
-
-    function handler(response) {
-      adapter.responseHandler(response, success, error);
-    }
 
     delete options.success;
     delete options.error;
     delete options.method;
 
-    return this.ajax(url, method, options).then(handler, handler);
+    return this.ajax(url, method, options)
+      .then(function(response) {
+        adapter.responseHandler(response, success, error);
+      }, function(response) {
+        throw error.call(adapter, response);
+      })
+      .then(null, DS.rejectionHandler);
   },
 
   ajax: function(url, method, options) {
@@ -9166,7 +9187,7 @@ DS.RESTAdapter = DS.Adapter.extend({
     return serializer.pluralize(string);
   },
 
-  buildURL: function(record, suffix) {
+  buildURL: function(root, suffix, record) {
     var url = [this.url];
 
 
@@ -9176,7 +9197,7 @@ DS.RESTAdapter = DS.Adapter.extend({
       url.push(this.namespace);
     }
 
-    url.push(this.pluralize(record));
+    url.push(this.pluralize(root));
     if (suffix !== undefined) {
       url.push(suffix);
     }
