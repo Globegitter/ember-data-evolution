@@ -758,10 +758,15 @@ DS.Store = Ember.Object.extend(DS._Mappable, {
     @private
   */
   resolveWith: function(thenable, recordOrArray) {
+    var store = this;
     return Ember.RSVP.resolve(thenable).then(function() {
       return recordOrArray;
     }, function(error) {
-      recordOrArray.adapterDidError(error);
+      if (error instanceof DS.ValidationError) {
+        store.recordWasInvalid(recordOrArray, error.errors);
+      } else {
+        store.recordWasError(recordOrArray, error);
+      }
       return Ember.RSVP.reject(error);
     });
   },
